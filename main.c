@@ -1,6 +1,7 @@
 #include <hydrogen.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,7 +62,26 @@ void *reader(void *ptr) {
   }
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+  bool connector = false;
+  bool listener = false;
+  char opt;
+
+  while ((opt = getopt(argc, argv, "cl")) != -1) {
+    switch (opt) {
+    case 'c':
+      connector = true;
+      break;
+    case 'l':
+      listener = true;
+      break;
+    }
+  }
+
+  if (connector == listener) {
+    die("-l or -c");
+  }
+
   struct termios tio;
   tcgetattr(STDIN_FILENO, &tio);
   tio.c_lflag &= (~ICANON);
@@ -82,7 +102,7 @@ int main() {
   uint8_t packet2[hydro_kx_XX_PACKET2BYTES];
   uint8_t packet3[hydro_kx_XX_PACKET3BYTES];
 
-  if (1 /*listener*/) {
+  if (listener) {
     int lfd = socket(AF_INET, SOCK_STREAM, 0);
     if (lfd == -1) {
       die("socket creation failed");
@@ -115,7 +135,7 @@ int main() {
     readall(fd, packet3, sizeof packet3);
     if (hydro_kx_xx_4(&state, &session_kp, NULL, packet3, psk))
       die("invalid packet 3");
-  } else {
+  } else if (connector) {
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == -1) {
       die("socket creation failed");
