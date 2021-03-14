@@ -80,18 +80,16 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (connector == listener) {
+  if (connector == listener)
     die("usage: vsn -l [port] or vsn -c host [port]");
-  }
 
   struct termios tio;
   tcgetattr(STDIN_FILENO, &tio);
   tio.c_lflag &= (~ICANON);
   tcsetattr(STDIN_FILENO, TCSANOW, &tio);
 
-  if (hydro_init()) {
+  if (hydro_init())
     die("can't init libhydrogen");
-  }
 
   hydro_kx_keypair static_kp;
   hydro_kx_keygen(&static_kp);
@@ -106,9 +104,8 @@ int main(int argc, char *argv[]) {
 
   if (listener) {
     int lfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (lfd == -1) {
+    if (lfd == -1)
       die("socket creation failed");
-    }
 
     int on = 1;
     if (setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on))
@@ -126,14 +123,11 @@ int main(int argc, char *argv[]) {
                                      .sin_addr.s_addr = htonl(INADDR_ANY),
                                      .sin_port = htons(port)};
 
-    if (bind(lfd, (struct sockaddr *)&addr, sizeof addr)) {
+    if (bind(lfd, (struct sockaddr *)&addr, sizeof addr))
       die("failed to bind socket");
-    }
 
-    if (listen(lfd, 0)) {
+    if (listen(lfd, 0))
       die("listen failed");
-      exit(0);
-    }
 
     fd = accept(lfd, NULL, NULL);
 
@@ -147,9 +141,8 @@ int main(int argc, char *argv[]) {
       die("invalid packet 3");
   } else if (connector) {
     fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == -1) {
+    if (fd == -1)
       die("socket creation failed");
-    }
 
     if (argc <= optind)
       die("usage: vsn -l [port] or vsn -c host [port]");
