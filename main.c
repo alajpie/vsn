@@ -67,54 +67,77 @@ int main() {
   tio.c_lflag &= (~ICANON);
   tcsetattr(STDIN_FILENO, TCSANOW, &tio);
 
-  if (hydro_init() != 0) {
+  if (hydro_init()) {
     die("can't init libhydrogen");
   }
 
   hydro_kx_keypair static_kp;
   hydro_kx_keygen(&static_kp);
 
-  int lfd = socket(AF_INET, SOCK_STREAM, 0);
-  if (lfd == -1) {
-    die("socket creation failed");
-  }
-
-  int on = 1;
-  if (setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on))
-    die("can't setsockopt");
-
-  const struct sockaddr_in addr = {.sin_family = AF_INET,
-                                   .sin_addr.s_addr = htonl(INADDR_ANY),
-                                   .sin_port = htons(PORT)};
-
-  if ((bind(lfd, (struct sockaddr *)&addr, sizeof addr)) != 0) {
-    die("failed to bind socket");
-  }
-
-  if ((listen(lfd, 0)) != 0) {
-    die("listen failed");
-    exit(0);
-  }
-
-  int fd = accept(lfd, NULL, NULL);
-
-  uint8_t packet1[hydro_kx_XX_PACKET1BYTES];
-  readall(fd, packet1, sizeof packet1);
-
-  hydro_kx_state state;
-  uint8_t packet2[hydro_kx_XX_PACKET2BYTES];
   const uint8_t psk[hydro_kx_PSKBYTES] = " vsnvsnvsnvsnvsnvsnvsnvsnvsnvsn ";
-  if (hydro_kx_xx_2(&state, packet2, packet1, psk, &static_kp))
-    die("invalid packet 1");
-
-  writeall(fd, packet2, sizeof packet2);
-
-  uint8_t packet3[hydro_kx_XX_PACKET3BYTES];
-  readall(fd, packet3, sizeof packet3);
-
   hydro_kx_session_keypair session_kp;
-  if (hydro_kx_xx_4(&state, &session_kp, NULL, packet3, psk))
-    die("invalid packet 3");
+  hydro_kx_state state;
+  int fd;
+  uint8_t packet1[hydro_kx_XX_PACKET1BYTES];
+  uint8_t packet2[hydro_kx_XX_PACKET2BYTES];
+  uint8_t packet3[hydro_kx_XX_PACKET3BYTES];
+
+  if (1 /*listener*/) {
+    int lfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (lfd == -1) {
+      die("socket creation failed");
+    }
+
+    int on = 1;
+    if (setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on))
+      die("can't setsockopt");
+
+    const struct sockaddr_in addr = {.sin_family = AF_INET,
+                                     .sin_addr.s_addr = htonl(INADDR_ANY),
+                                     .sin_port = htons(PORT)};
+
+    if (bind(lfd, (struct sockaddr *)&addr, sizeof addr)) {
+      die("failed to bind socket");
+    }
+
+    if (listen(lfd, 0)) {
+      die("listen failed");
+      exit(0);
+    }
+
+    fd = accept(lfd, NULL, NULL);
+
+    readall(fd, packet1, sizeof packet1);
+    if (hydro_kx_xx_2(&state, packet2, packet1, psk, &static_kp))
+      die("invalid packet 1");
+    writeall(fd, packet2, sizeof packet2);
+
+    readall(fd, packet3, sizeof packet3);
+    if (hydro_kx_xx_4(&state, &session_kp, NULL, packet3, psk))
+      die("invalid packet 3");
+  } else {
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == -1) {
+      die("socket creation failed");
+    }
+
+    const struct sockaddr_in addr = {.sin_family = AF_INET,
+                                     .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
+                                     .sin_port = htons(PORT)};
+
+    if ((connect(fd, (struct sockaddr *)&addr, sizeof addr))) {
+      die("failed to connect");
+    }
+
+    hydro_kx_xx_1(&state, packet1, psk);
+    writeall(fd, packet1, sizeof packet1);
+
+    readall(fd, packet2, sizeof packet2);
+    if (hydro_kx_xx_3(&state, &session_kp, packet3, NULL, packet2, psk,
+                      &static_kp))
+      die("invalid packet 2");
+    writeall(fd, packet3, sizeof packet3);
+  }
 
   pthread_t reader_thread;
   char plain[1024];
