@@ -55,7 +55,7 @@ void *reader(void *ptr) {
     char plain[len - hydro_secretbox_HEADERBYTES];
     if (hydro_secretbox_decrypt(plain, cipher, len, 0, " vsnvsn ",
                                 data.session_kp.rx))
-      die("can't decrypt");
+      die("hydro_secretbox_decrypt() failed");
 
     printf("\r\x1b[2Kthem: ");
     fwrite(plain, 1, len - hydro_secretbox_HEADERBYTES, stdout);
@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
   tcsetattr(STDIN_FILENO, TCSANOW, &tio);
 
   if (hydro_init())
-    die("can't init libhydrogen");
+    die("hydro_init() failed");
 
   hydro_kx_keypair static_kp;
   hydro_kx_keygen(&static_kp);
@@ -105,11 +105,11 @@ int main(int argc, char *argv[]) {
   if (listener) {
     int lfd = socket(AF_INET, SOCK_STREAM, 0);
     if (lfd == -1)
-      die("socket creation failed");
+      die("socket() failed");
 
     int on = 1;
     if (setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on))
-      die("can't setsockopt");
+      die("setsockopt() failed");
 
     int port = PORT;
     if (argc > optind) {
@@ -124,10 +124,10 @@ int main(int argc, char *argv[]) {
                                      .sin_port = htons(port)};
 
     if (bind(lfd, (struct sockaddr *)&addr, sizeof addr))
-      die("failed to bind socket");
+      die("bind() failed");
 
     if (listen(lfd, 0))
-      die("listen failed");
+      die("listen() failed");
 
     fd = accept(lfd, NULL, NULL);
 
@@ -142,7 +142,7 @@ int main(int argc, char *argv[]) {
   } else if (connector) {
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == -1)
-      die("socket creation failed");
+      die("socket() failed");
 
     if (argc <= optind)
       die("usage: vsn -l [port] or vsn -c host [port]");
@@ -156,10 +156,10 @@ int main(int argc, char *argv[]) {
       code = getaddrinfo(argv[optind], NULL, &hints, &result);
 
     if (code)
-      die("getaddrinfo failed");
+      die("getaddrinfo() failed");
 
     if ((connect(fd, result->ai_addr, result->ai_addrlen)))
-      die("failed to connect");
+      die("connect() failed");
 
     freeaddrinfo(result);
 
