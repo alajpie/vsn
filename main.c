@@ -1,3 +1,4 @@
+#include <getopt.h>
 #include <hydrogen.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -79,7 +80,7 @@ int main(int argc, char *argv[]) {
   }
 
   if (connector == listener) {
-    die("-l or -c");
+    die("usage: vsn -l [port] or vsn -c host [port]");
   }
 
   struct termios tio;
@@ -112,9 +113,17 @@ int main(int argc, char *argv[]) {
     if (setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on))
       die("can't setsockopt");
 
+    int port = PORT;
+    if (argc > optind) {
+      char *portstring = argv[optind];
+      int portparse = atoi(portstring);
+      if (portparse)
+        port = portparse;
+    }
+
     const struct sockaddr_in addr = {.sin_family = AF_INET,
                                      .sin_addr.s_addr = htonl(INADDR_ANY),
-                                     .sin_port = htons(PORT)};
+                                     .sin_port = htons(port)};
 
     if (bind(lfd, (struct sockaddr *)&addr, sizeof addr)) {
       die("failed to bind socket");
