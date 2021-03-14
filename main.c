@@ -1,5 +1,5 @@
-#include <getopt.h>
 #include <hydrogen.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -150,13 +151,24 @@ int main(int argc, char *argv[]) {
       die("socket creation failed");
     }
 
-    const struct sockaddr_in addr = {.sin_family = AF_INET,
-                                     .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
-                                     .sin_port = htons(PORT)};
+    if (argc <= optind)
+      die("usage: vsn -l [port] or vsn -c host [port]");
 
-    if ((connect(fd, (struct sockaddr *)&addr, sizeof addr))) {
+    struct addrinfo *result;
+    struct addrinfo hints = {.ai_family = AF_INET, .ai_flags = AI_NUMERICSERV};
+    int code;
+    if (argc > (optind + 1))
+      code = getaddrinfo(argv[optind], argv[optind + 1], &hints, &result);
+    else
+      code = getaddrinfo(argv[optind], NULL, &hints, &result);
+
+    if (code)
+      die("getaddrinfo failed");
+
+    if ((connect(fd, result->ai_addr, result->ai_addrlen)))
       die("failed to connect");
-    }
+
+    freeaddrinfo(result);
 
     hydro_kx_xx_1(&state, packet1, psk);
     writeall(fd, packet1, sizeof packet1);
