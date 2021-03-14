@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #define PORT 47478
+#define PORTSTR "47478"
 
 void die(char *msg) {
   fprintf(stderr, "vsn: %s\n", msg);
@@ -153,7 +154,7 @@ int main(int argc, char *argv[]) {
     if (argc > (optind + 1))
       code = getaddrinfo(argv[optind], argv[optind + 1], &hints, &result);
     else
-      code = getaddrinfo(argv[optind], NULL, &hints, &result);
+      code = getaddrinfo(argv[optind], PORTSTR, &hints, &result);
 
     if (code)
       die("getaddrinfo() failed");
