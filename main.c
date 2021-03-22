@@ -2,13 +2,13 @@
 #include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <pthread.h>
 #include <readline/readline.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -40,41 +40,31 @@ void writeall(int fd, const void *buf, size_t n) {
   }
 }
 
-struct reader_data {
-  int fd;
+struct globe {
   hydro_kx_session_keypair session_kp;
+  int fd;
 };
 
-void *reader(void *ptr) {
-  struct reader_data data = *(struct reader_data *)ptr;
-  for (;;) {
-    uint16_t sendlen;
-    readall(data.fd, &sendlen, sizeof sendlen);
+struct globe globe;
 
-    int len = ntohs(sendlen);
-    uint8_t cipher[len];
-    readall(data.fd, cipher, sizeof cipher);
-
-    char plain[len - hydro_secretbox_HEADERBYTES + 1];
-    if (hydro_secretbox_decrypt(plain, cipher, len, 0, " vsnvsn ",
-                                data.session_kp.rx))
-      die("hydro_secretbox_decrypt() failed");
-    plain[len - hydro_secretbox_HEADERBYTES] = 0;
-
-    int saved_point = rl_point;
-    char *saved_line = rl_copy_text(0, rl_end);
+void callback(char *plain) {
+  if (!plain) {
     rl_save_prompt();
-    rl_replace_line("", 0);
     rl_redisplay();
-
-    printf("them: %s\n", plain);
-
-    rl_restore_prompt();
-    rl_replace_line(saved_line, 0);
-    rl_point = saved_point;
-    rl_redisplay();
-    rl_free(saved_line);
+    exit(0);
   }
+
+  int len = strlen(plain);
+  if (len + hydro_secretbox_HEADERBYTES > USHRT_MAX)
+    die("message too long");
+  uint16_t sendlen = htons(hydro_secretbox_HEADERBYTES + len);
+  writeall(globe.fd, &sendlen, sizeof sendlen);
+
+  uint8_t cipher[hydro_secretbox_HEADERBYTES + len];
+  hydro_secretbox_encrypt(cipher, plain, len, 0, " vsnvsn ",
+                          globe.session_kp.tx);
+  rl_free(plain);
+  writeall(globe.fd, cipher, sizeof cipher);
 }
 
 int main(int argc, char *argv[]) {
@@ -103,9 +93,7 @@ int main(int argc, char *argv[]) {
   hydro_kx_keygen(&static_kp);
 
   const uint8_t psk[hydro_kx_PSKBYTES] = " vsnvsnvsnvsnvsnvsnvsnvsnvsnvsn ";
-  hydro_kx_session_keypair session_kp;
   hydro_kx_state state;
-  int fd = -1;
   uint8_t packet1[hydro_kx_XX_PACKET1BYTES];
   uint8_t packet2[hydro_kx_XX_PACKET2BYTES];
   uint8_t packet3[hydro_kx_XX_PACKET3BYTES];
@@ -137,19 +125,19 @@ int main(int argc, char *argv[]) {
     if (listen(lfd, 0))
       die("listen() failed");
 
-    fd = accept(lfd, NULL, NULL);
+    globe.fd = accept(lfd, NULL, NULL);
 
-    readall(fd, packet1, sizeof packet1);
+    readall(globe.fd, packet1, sizeof packet1);
     if (hydro_kx_xx_2(&state, packet2, packet1, psk, &static_kp))
       die("invalid packet 1");
-    writeall(fd, packet2, sizeof packet2);
+    writeall(globe.fd, packet2, sizeof packet2);
 
-    readall(fd, packet3, sizeof packet3);
-    if (hydro_kx_xx_4(&state, &session_kp, NULL, packet3, psk))
+    readall(globe.fd, packet3, sizeof packet3);
+    if (hydro_kx_xx_4(&state, &globe.session_kp, NULL, packet3, psk))
       die("invalid packet 3");
   } else if (connector) {
-    fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == -1)
+    globe.fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (globe.fd == -1)
       die("socket() failed");
 
     if (argc <= optind)
@@ -166,45 +154,63 @@ int main(int argc, char *argv[]) {
     if (code)
       die("getaddrinfo() failed");
 
-    if ((connect(fd, result->ai_addr, result->ai_addrlen)))
+    if ((connect(globe.fd, result->ai_addr, result->ai_addrlen)))
       die("connect() failed");
 
     freeaddrinfo(result);
 
     hydro_kx_xx_1(&state, packet1, psk);
-    writeall(fd, packet1, sizeof packet1);
+    writeall(globe.fd, packet1, sizeof packet1);
 
-    readall(fd, packet2, sizeof packet2);
-    if (hydro_kx_xx_3(&state, &session_kp, packet3, NULL, packet2, psk,
+    readall(globe.fd, packet2, sizeof packet2);
+    if (hydro_kx_xx_3(&state, &globe.session_kp, packet3, NULL, packet2, psk,
                       &static_kp))
       die("invalid packet 2");
-    writeall(fd, packet3, sizeof packet3);
+    writeall(globe.fd, packet3, sizeof packet3);
   }
 
-  pthread_t reader_thread;
-  struct reader_data data = {
-      .fd = fd,
-      .session_kp = session_kp,
-  };
-  pthread_create(&reader_thread, NULL, reader, &data);
+  rl_callback_handler_install("me: ", callback);
 
-  for (;;) {
-    char *plain = readline("me: ");
-    if (!plain) {
+  fd_set fds;
+  FD_ZERO(&fds);
+  FD_SET(0, &fds);
+  FD_SET(globe.fd, &fds);
+
+  while (select(globe.fd + 1, &fds, NULL, NULL, NULL) != -1) {
+    if (FD_ISSET(globe.fd, &fds)) {
+      uint16_t sendlen;
+      readall(globe.fd, &sendlen, sizeof sendlen);
+
+      int len = ntohs(sendlen);
+      uint8_t cipher[len];
+      readall(globe.fd, cipher, sizeof cipher);
+
+      char plain[len - hydro_secretbox_HEADERBYTES + 1];
+      if (hydro_secretbox_decrypt(plain, cipher, len, 0, " vsnvsn ",
+                                  globe.session_kp.rx))
+        die("hydro_secretbox_decrypt() failed");
+      plain[len - hydro_secretbox_HEADERBYTES] = 0;
+
+      int saved_point = rl_point;
+      char *saved_line = rl_copy_text(0, rl_end);
       rl_save_prompt();
+      rl_replace_line("", 0);
       rl_redisplay();
-      exit(0);
+
+      printf("them: %s\n", plain);
+
+      rl_restore_prompt();
+      rl_replace_line(saved_line, 0);
+      rl_point = saved_point;
+      rl_redisplay();
+      rl_free(saved_line);
+    }
+    if (FD_ISSET(0, &fds)) {
+      rl_callback_read_char();
     }
 
-    int len = strlen(plain);
-    if (len + hydro_secretbox_HEADERBYTES > USHRT_MAX)
-      die("message too long");
-    uint16_t sendlen = htons(hydro_secretbox_HEADERBYTES + len);
-    writeall(fd, &sendlen, sizeof sendlen);
-
-    uint8_t cipher[hydro_secretbox_HEADERBYTES + len];
-    hydro_secretbox_encrypt(cipher, plain, len, 0, " vsnvsn ", session_kp.tx);
-    rl_free(plain);
-    writeall(fd, cipher, sizeof cipher);
-  }
+    FD_ZERO(&fds);
+    FD_SET(0, &fds);
+    FD_SET(globe.fd, &fds);
+  };
 }
