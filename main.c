@@ -1,20 +1,23 @@
 #include <hydrogen.h>
+#include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <readline/readline.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/types.h>
-#include <termios.h>
 #include <unistd.h>
 
 #define PORT 47478
 #define PORTSTR "47478"
 
 void die(char *msg) {
+  rl_save_prompt();
+  rl_redisplay();
   fprintf(stderr, "vsn: %s\n", msg);
   exit(1);
 }
@@ -40,7 +43,6 @@ void writeall(int fd, const void *buf, size_t n) {
 struct reader_data {
   int fd;
   hydro_kx_session_keypair session_kp;
-  char *line;
 };
 
 void *reader(void *ptr) {
@@ -53,15 +55,25 @@ void *reader(void *ptr) {
     uint8_t cipher[len];
     readall(data.fd, cipher, sizeof cipher);
 
-    char plain[len - hydro_secretbox_HEADERBYTES];
+    char plain[len - hydro_secretbox_HEADERBYTES + 1];
     if (hydro_secretbox_decrypt(plain, cipher, len, 0, " vsnvsn ",
                                 data.session_kp.rx))
       die("hydro_secretbox_decrypt() failed");
+    plain[len - hydro_secretbox_HEADERBYTES] = 0;
 
-    printf("\r\x1b[2Kthem: ");
-    fwrite(plain, 1, len - hydro_secretbox_HEADERBYTES, stdout);
-    printf("me: %s", data.line);
-    fflush(stdout);
+    int saved_point = rl_point;
+    char *saved_line = rl_copy_text(0, rl_end);
+    rl_save_prompt();
+    rl_replace_line("", 0);
+    rl_redisplay();
+
+    printf("them: %s\n", plain);
+
+    rl_restore_prompt();
+    rl_replace_line(saved_line, 0);
+    rl_point = saved_point;
+    rl_redisplay();
+    rl_free(saved_line);
   }
 }
 
@@ -83,11 +95,6 @@ int main(int argc, char *argv[]) {
 
   if (connector == listener)
     die("usage: vsn -l [port] or vsn -c host [port]");
-
-  struct termios tio;
-  tcgetattr(STDIN_FILENO, &tio);
-  tio.c_lflag &= (~ICANON);
-  tcsetattr(STDIN_FILENO, TCSANOW, &tio);
 
   if (hydro_init())
     die("hydro_init() failed");
@@ -175,30 +182,29 @@ int main(int argc, char *argv[]) {
   }
 
   pthread_t reader_thread;
-  char plain[1024];
-  struct reader_data data = {.fd = fd, .session_kp = session_kp, .line = plain};
+  struct reader_data data = {
+      .fd = fd,
+      .session_kp = session_kp,
+  };
   pthread_create(&reader_thread, NULL, reader, &data);
 
   for (;;) {
-    plain[0] = 0;
-    printf("me: ");
-    fflush(stdout);
-    int i = 0;
-
-    for (;;) {
-      plain[i] = getchar();
-      plain[i + 1] = 0;
-      if (plain[i] == '\n' || i == 1024 - 2)
-        break;
-      i++;
+    char *plain = readline("me: ");
+    if (!plain) {
+      rl_save_prompt();
+      rl_redisplay();
+      exit(0);
     }
 
     int len = strlen(plain);
+    if (len + hydro_secretbox_HEADERBYTES > USHRT_MAX)
+      die("message too long");
     uint16_t sendlen = htons(hydro_secretbox_HEADERBYTES + len);
     writeall(fd, &sendlen, sizeof sendlen);
 
     uint8_t cipher[hydro_secretbox_HEADERBYTES + len];
     hydro_secretbox_encrypt(cipher, plain, len, 0, " vsnvsn ", session_kp.tx);
+    rl_free(plain);
     writeall(fd, cipher, sizeof cipher);
   }
 }
