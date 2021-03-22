@@ -25,7 +25,7 @@ void die(char *msg) {
 void readall(int fd, void *buf, size_t n) {
   size_t k = 0;
   for (size_t i = 0; i < n; i += k) {
-    k = read(fd, buf + i, n - i);
+    k = read(fd, (char *)buf + i, n - i);
     if (!k)
       die("connection reset by peer");
   }
@@ -34,7 +34,7 @@ void readall(int fd, void *buf, size_t n) {
 void writeall(int fd, const void *buf, size_t n) {
   size_t k = 0;
   for (size_t i = 0; i < n; i += k) {
-    k = write(fd, buf + i, n - i);
+    k = write(fd, (char *)buf + i, n - i);
     if (!k)
       die("connection reset by peer");
   }
@@ -80,7 +80,7 @@ void *reader(void *ptr) {
 int main(int argc, char *argv[]) {
   bool connector = false;
   bool listener = false;
-  char opt;
+  signed char opt;
 
   while ((opt = getopt(argc, argv, "cl")) != -1) {
     switch (opt) {
@@ -105,7 +105,7 @@ int main(int argc, char *argv[]) {
   const uint8_t psk[hydro_kx_PSKBYTES] = " vsnvsnvsnvsnvsnvsnvsnvsnvsnvsn ";
   hydro_kx_session_keypair session_kp;
   hydro_kx_state state;
-  int fd;
+  int fd = -1;
   uint8_t packet1[hydro_kx_XX_PACKET1BYTES];
   uint8_t packet2[hydro_kx_XX_PACKET2BYTES];
   uint8_t packet3[hydro_kx_XX_PACKET3BYTES];
