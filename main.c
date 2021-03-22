@@ -188,7 +188,7 @@ int main(int argc, char *argv[]) {
     for (;;) {
       plain[i] = getchar();
       plain[i + 1] = 0;
-      if (plain[i] == '\n' || i == 1023)
+      if (plain[i] == '\n' || i == 1024 - 2)
         break;
       i++;
     }
