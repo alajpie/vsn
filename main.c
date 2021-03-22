@@ -57,11 +57,12 @@ void callback(char *plain) {
   int len = strlen(plain);
   if (len + hydro_secretbox_HEADERBYTES > USHRT_MAX)
     die("message too long");
-  uint16_t sendlen = htons(hydro_secretbox_HEADERBYTES + len);
-  writeall(globe.fd, &sendlen, sizeof sendlen);
 
-  uint8_t cipher[hydro_secretbox_HEADERBYTES + len];
-  hydro_secretbox_encrypt(cipher, plain, len, 0, " vsnvsn ",
+  uint16_t sendlen = htons(hydro_secretbox_HEADERBYTES + len);
+  uint8_t cipher[hydro_secretbox_HEADERBYTES + len + sizeof sendlen];
+  memcpy(cipher, &sendlen, sizeof sendlen);
+
+  hydro_secretbox_encrypt(cipher + sizeof sendlen, plain, len, 0, " vsnvsn ",
                           globe.session_kp.tx);
   rl_free(plain);
   writeall(globe.fd, cipher, sizeof cipher);
